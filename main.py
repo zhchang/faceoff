@@ -2,6 +2,7 @@ import cv2
 import dlib
 import numpy as np
 import argparse
+import logging
 
 # TODO: Pending Integration - Disney Princess Image
 # This script will be updated to include functionality for changing faces
@@ -93,41 +94,60 @@ def apply_face_swap(src_image, src_face, dst_image, dst_face):
         numpy.ndarray: Image with the face swapped, or original destination image if swap fails.
     """
     try:
+        logging.debug("Starting face swap process")
+
         # Step 1: Get facial landmarks for both source and destination faces
         src_landmarks = get_face_landmarks(src_image, src_face)
         dst_landmarks = get_face_landmarks(dst_image, dst_face)
 
         # Ensure landmarks were successfully detected
         if len(src_landmarks) == 0 or len(dst_landmarks) == 0:
+            logging.error("Failed to detect face landmarks")
             raise ValueError("Failed to detect face landmarks")
+
+        logging.debug(f"Detected landmarks - Source: {len(src_landmarks)}, Destination: {len(dst_landmarks)}")
 
         # Step 2: Create a mask for the source face
         src_mask = np.zeros(src_image.shape[:2], dtype=np.float64)
         cv2.fillConvexPoly(src_mask, cv2.convexHull(src_landmarks), 1)
+        logging.debug("Created source face mask")
 
         # Step 3: Get the bounding rectangle of the destination face
         (x, y, w, h) = cv2.boundingRect(dst_landmarks)
+        logging.debug(f"Destination face bounding rectangle: x={x}, y={y}, w={w}, h={h}")
 
         # Step 4: Ensure the bounding rectangle is within the image bounds
-        if x < 0 or y < 0 or x + w > dst_image.shape[1] or y + h > dst_image.shape[0]:
-            print("ROI out of bounds, skipping face swap for this frame")
-            return dst_image
-
-        # Adjust bounding rectangle to fit within image bounds
         x = max(0, x)
         y = max(0, y)
         w = min(w, dst_image.shape[1] - x)
         h = min(h, dst_image.shape[0] - y)
+        logging.debug(f"Adjusted bounding rectangle: x={x}, y={y}, w={w}, h={h}")
 
         # Step 5: Calculate the center point for seamless cloning
-        center_x = min(max(x + w // 2, 0), dst_image.shape[1] - 1)
-        center_y = min(max(y + h // 2, 0), dst_image.shape[0] - 1)
+        center_x = x + w // 2
+        center_y = y + h // 2
         center = (center_x, center_y)
+        logging.debug(f"Seamless cloning center point: {center}")
 
-        # Step 6: Check if the source image is large enough for the face swap
+        # Step 6: Resize source image if it's too small
         if src_image.shape[0] < h or src_image.shape[1] < w:
-            print("Source image too small for face swap, skipping this frame")
-            return dst_image
+            scale_factor = max(h / src_image.shape[0], w / src_image.shape[1])
+            new_size = (int(src_image.shape[1] * scale_factor), int(src_image.shape[0] * scale_factor))
+            src_image = cv2.resize(src_image, new_size, interpolation=cv2.INTER_LINEAR)
+            src_mask = cv2.resize(src_mask, new_size, interpolation=cv2.INTER_LINEAR)
+            logging.debug(f"Resized source image to {new_size}")
+
+        # Step 7: Crop the source image and mask to match the destination face size
+        src_face_img = src_image[max(0, center_y - h//2):min(src_image.shape[0], center_y + h//2),
+                                 max(0, center_x - w//2):min(src_image.shape[1], center_x + w//2)]
+        src_face_mask = src_mask[max(0, center_y - h//2):min(src_mask.shape[0], center_y + h//2),
+                                 max(0, center_x - w//2):min(src_mask.shape[1], center_x + w//2)]
+
+        # Ensure the cropped images have the correct dimensions
+        if src_face_img.shape[:2] != (h, w):
+            src_face_img = cv2.resize(src_face_img, (w, h), interpolation=cv2.INTER_LINEAR)
+            src_face_mask = cv2.resize(src_face_mask, (w, h), interpolation=cv2.INTER_LINEAR)
+            logging.debug(f"Resized cropped face image to {src_face_img.shape[:2]}")
 
         # TODO: Add Disney princess image processing logic
         # This section will be implemented once we receive authorization and the Disney princess image.
@@ -136,14 +156,16 @@ def apply_face_swap(src_image, src_face, dst_image, dst_face):
         # - Enhancing facial features to resemble a cartoon character
         # - Applying additional filters or effects to create a more animated look
 
-        # Step 7: Apply seamless cloning to swap the faces
+        # Step 8: Apply seamless cloning to swap the faces
+        logging.debug("Applying seamless cloning")
         output = cv2.seamlessClone(
-            src_image, dst_image, src_mask.astype(np.uint8) * 255, center, cv2.NORMAL_CLONE
+            src_face_img, dst_image, (src_face_mask * 255).astype(np.uint8), center, cv2.NORMAL_CLONE
         )
 
+        logging.debug("Face swap completed successfully")
         return output
     except Exception as e:
-        print(f"Error in apply_face_swap: {str(e)}")
+        logging.error(f"Error in apply_face_swap: {str(e)}")
         return dst_image  # Return the original image if face swap fails
 
 def process_video(video_path, photo_path, output_path):
@@ -161,18 +183,24 @@ def process_video(video_path, photo_path, output_path):
     Raises:
         ValueError: If the video file cannot be opened.
     """
+    logging.info(f"Starting video processing: {video_path}")
+
     # Open the video file and read the photo
     video = cv2.VideoCapture(video_path)
     photo = cv2.imread(photo_path)
 
     # Check if the video file was successfully opened
     if not video.isOpened():
+        logging.error(f"Could not open video file: {video_path}")
         raise ValueError("Could not open video file")
 
     # Get video properties
     width = int(video.get(cv2.CAP_PROP_FRAME_WIDTH))
     height = int(video.get(cv2.CAP_PROP_FRAME_HEIGHT))
     fps = int(video.get(cv2.CAP_PROP_FPS))
+    total_frames = int(video.get(cv2.CAP_PROP_FRAME_COUNT))
+
+    logging.info(f"Video properties: {width}x{height}, {fps} fps, {total_frames} frames")
 
     # Set up the output video writer
     fourcc = cv2.VideoWriter_fourcc(*'mp4v')
@@ -181,24 +209,33 @@ def process_video(video_path, photo_path, output_path):
     # Detect the face in the input photo
     try:
         src_face = detect_face(photo)
+        logging.info("Successfully detected face in input photo")
     except ValueError as e:
-        print(f"Error: {str(e)}")
+        logging.error(f"Error detecting face in input photo: {str(e)}")
         return
 
     # Initialize the face detector for video frames
     detector = dlib.get_frontal_face_detector()
 
     # Process each frame of the video
+    frame_count = 0
     while True:
         ret, frame = video.read()
         if not ret:
+            logging.info("Reached end of video")
             break  # End of video
+
+        frame_count += 1
+        if frame_count % 100 == 0:
+            logging.info(f"Processing frame {frame_count}/{total_frames}")
 
         # Detect faces in the current frame
         faces = detector(frame)
+        logging.debug(f"Detected {len(faces)} faces in frame {frame_count}")
 
         # Apply face swapping to each detected face
-        for face in faces:
+        for i, face in enumerate(faces):
+            logging.debug(f"Applying face swap to face {i+1} in frame {frame_count}")
             frame = apply_face_swap(photo, src_face, frame, face)
 
         # Write the processed frame to the output video
@@ -207,6 +244,7 @@ def process_video(video_path, photo_path, output_path):
     # Release resources
     video.release()
     out.release()
+    logging.info(f"Video processing completed. Output saved to: {output_path}")
 
 def main():
     """
@@ -216,13 +254,21 @@ def main():
     parser.add_argument("video", help="Path to the input video file")
     parser.add_argument("photo", help="Path to the input photo file")
     parser.add_argument("output", help="Path to the output video file")
+    parser.add_argument("--log", help="Log level (DEBUG, INFO, WARNING, ERROR, CRITICAL)", default="INFO")
     args = parser.parse_args()
 
+    # Configure logging
+    numeric_level = getattr(logging, args.log.upper(), None)
+    if not isinstance(numeric_level, int):
+        raise ValueError(f"Invalid log level: {args.log}")
+    logging.basicConfig(level=numeric_level, format='%(asctime)s - %(levelname)s - %(message)s')
+
     try:
+        logging.info("Starting video processing")
         process_video(args.video, args.photo, args.output)
-        print("Video processing completed successfully.")
+        logging.info("Video processing completed successfully.")
     except Exception as e:
-        print(f"An error occurred: {str(e)}")
+        logging.error(f"An error occurred: {str(e)}", exc_info=True)
 
 if __name__ == "__main__":
     main()
