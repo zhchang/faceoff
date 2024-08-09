@@ -3,6 +3,16 @@ import dlib
 import numpy as np
 import argparse
 
+# TODO: Pending Integration - Disney Princess Image
+# This script will be updated to include functionality for changing faces
+# in videos to Disney princess faces. The integration is pending user
+# authorization to obtain and use Disney princess images.
+#
+# Future updates will include:
+# 1. Loading and preprocessing of Disney princess images
+# 2. Adapting face detection and landmark detection for cartoon-style faces
+# 3. Enhancing face swapping algorithm for smoother integration with animated features
+
 def detect_face(image):
     """
     Detect a face in the given image using dlib's frontal face detector.
@@ -118,6 +128,13 @@ def apply_face_swap(src_image, src_face, dst_image, dst_face):
         if src_image.shape[0] < h or src_image.shape[1] < w:
             print("Source image too small for face swap, skipping this frame")
             return dst_image
+
+        # TODO: Add Disney princess image processing logic
+        # This section will be implemented once we receive authorization and the Disney princess image.
+        # Potential steps may include:
+        # - Adjusting the color palette to match the Disney style
+        # - Enhancing facial features to resemble a cartoon character
+        # - Applying additional filters or effects to create a more animated look
 
         # Step 7: Apply seamless cloning to swap the faces
         output = cv2.seamlessClone(
